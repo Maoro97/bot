@@ -5,7 +5,7 @@ from typing import Optional
 
 import aiohttp
 from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType, BUY
+from py_clob_client.clob_types import ApiCreds, OrderArgs
 from py_clob_client.order_builder.constants import BUY, SELL
 
 from config import config
