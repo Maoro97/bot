@@ -29,8 +29,8 @@ class Config:
     DRY_RUN: bool = os.getenv("DRY_RUN", "true").lower() == "true"
 
     def validate(self) -> None:
-        if not self.PRIVATE_KEY:
-            raise ValueError("PRIVATE_KEY is required")
+        if not self.DRY_RUN and not self.PRIVATE_KEY:
+            raise ValueError("PRIVATE_KEY is required for live trading")
         if not self.DRY_RUN and not all([self.API_KEY, self.API_SECRET, self.API_PASSPHRASE]):
             raise ValueError("API_KEY, API_SECRET, and API_PASSPHRASE are required for live trading")
 

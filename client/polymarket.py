@@ -24,19 +24,33 @@ class MarketPrices:
     liquidity: float
 
 
+def _is_valid_private_key(key: str) -> bool:
+    """Return True only if the key looks like a real hex private key."""
+    if not key:
+        return False
+    k = key.lower().removeprefix("0x")
+    return len(k) == 64 and all(c in "0123456789abcdef" for c in k)
+
+
 class PolymarketClient:
     def __init__(self) -> None:
+        has_key = _is_valid_private_key(config.PRIVATE_KEY)
+        has_creds = all([config.API_KEY, config.API_SECRET, config.API_PASSPHRASE])
+
         creds = ApiCreds(
             api_key=config.API_KEY,
             api_secret=config.API_SECRET,
             api_passphrase=config.API_PASSPHRASE,
-        )
+        ) if has_creds else None
+
         self._client = ClobClient(
             host=config.CLOB_HOST,
             chain_id=config.CHAIN_ID,
-            key=config.PRIVATE_KEY,
+            key=config.PRIVATE_KEY if has_key else None,
             creds=creds,
         )
+        if not has_key:
+            logger.warning("No valid PRIVATE_KEY — running in read-only/scan mode")
         logger.info("Polymarket CLOB client initialized (dry_run={})", config.DRY_RUN)
 
     # ------------------------------------------------------------------
