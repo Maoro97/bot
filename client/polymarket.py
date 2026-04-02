@@ -54,34 +54,46 @@ class PolymarketClient:
         logger.info("Polymarket CLOB client initialized (dry_run={})", config.DRY_RUN)
 
     # ------------------------------------------------------------------
-    # Market discovery (uses Gamma API via aiohttp — no auth required)
+    # Market discovery (uses CLOB API — guaranteed to have token IDs)
     # ------------------------------------------------------------------
 
     async def get_active_markets(self) -> list[dict]:
-        """Fetch active binary markets from the Gamma API."""
-        url = f"{config.GAMMA_HOST}/markets"
-        params = {
-            "active": "true",
-            "closed": "false",
-            "limit": 500,
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-        # Gamma API returns a list directly or wrapped in a key
-        markets = data if isinstance(data, list) else data.get("markets", [])
-        # Keep only binary (2-outcome) markets with sufficient liquidity
-        def liquidity(m: dict) -> float:
-            return float(m.get("liquidityNum") or m.get("liquidity") or 0)
+        """Fetch active binary markets from the CLOB API."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        try:
+            resp = await loop.run_in_executor(None, lambda: self._client.get_sampling_simplified_markets())
+            raw = resp if isinstance(resp, list) else (resp.get("data") or [])
+        except Exception as exc:
+            logger.error("CLOB get_sampling_simplified_markets failed: {}", exc)
+            # Fallback: Gamma API
+            raw = await self._get_markets_gamma()
 
-        binary = [
-            m for m in markets
-            if len(m.get("tokens", [])) == 2
-            and liquidity(m) >= config.MIN_LIQUIDITY
-        ]
-        logger.debug("Found {} active binary markets", len(binary))
-        return binary
+        markets = []
+        for m in raw:
+            tokens = m.get("tokens") or []
+            if len(tokens) != 2:
+                continue
+            markets.append(m)
+
+        logger.info("Market discovery: {}/{} binary markets loaded", len(markets), len(raw))
+        return markets
+
+    async def _get_markets_gamma(self) -> list[dict]:
+        """Fallback: fetch markets from Gamma API."""
+        url = f"{config.GAMMA_HOST}/markets"
+        params = {"active": "true", "closed": "false", "limit": 500}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+            raw = data if isinstance(data, list) else data.get("markets", [])
+            logger.info("Gamma API fallback returned {} raw markets", len(raw))
+            return raw
+        except Exception as exc:
+            logger.error("Gamma API fallback also failed: {}", exc)
+            return []
 
     # ------------------------------------------------------------------
     # Price fetching (CLOB API)

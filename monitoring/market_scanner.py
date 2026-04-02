@@ -29,7 +29,7 @@ class MarketScanner:
             logger.warning("No markets available to scan")
             return []
 
-        logger.debug("Scanning {} markets for arbitrage...", len(self._markets_cache))
+        logger.info("Scanning {} markets for arbitrage...", len(self._markets_cache))
 
         tasks = [self._evaluate_market(m) for m in self._markets_cache]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -44,7 +44,7 @@ class MarketScanner:
         if opportunities:
             logger.info("Found {} arbitrage opportunities this scan", len(opportunities))
         else:
-            logger.debug("No arbitrage opportunities found this scan")
+            logger.info("No arbitrage opportunities found this scan")
 
         return opportunities
 
