@@ -72,10 +72,13 @@ class PolymarketClient:
         # Gamma API returns a list directly or wrapped in a key
         markets = data if isinstance(data, list) else data.get("markets", [])
         # Keep only binary (2-outcome) markets with sufficient liquidity
+        def liquidity(m: dict) -> float:
+            return float(m.get("liquidityNum") or m.get("liquidity") or 0)
+
         binary = [
             m for m in markets
             if len(m.get("tokens", [])) == 2
-            and float(m.get("liquidityNum", 0) or 0) >= config.MIN_LIQUIDITY
+            and liquidity(m) >= config.MIN_LIQUIDITY
         ]
         logger.debug("Found {} active binary markets", len(binary))
         return binary
@@ -93,8 +96,10 @@ class PolymarketClient:
         yes_token = next((t for t in tokens if t.get("outcome", "").upper() == "YES"), tokens[0])
         no_token = next((t for t in tokens if t.get("outcome", "").upper() == "NO"), tokens[1])
 
-        yes_id = yes_token["token_id"]
-        no_id = no_token["token_id"]
+        yes_id = yes_token.get("token_id") or yes_token.get("tokenId", "")
+        no_id = no_token.get("token_id") or no_token.get("tokenId", "")
+        if not yes_id or not no_id:
+            return None
 
         try:
             yes_book = self._client.get_order_book(yes_id)
