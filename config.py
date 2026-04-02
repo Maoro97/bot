@@ -7,9 +7,9 @@ load_dotenv()
 class Config:
     # Wallet / auth
     PRIVATE_KEY: str = os.getenv("PRIVATE_KEY", "")
-    API_KEY: str = os.getenv("API_KEY", "")
-    API_SECRET: str = os.getenv("API_SECRET", "")
-    API_PASSPHRASE: str = os.getenv("API_PASSPHRASE", "")
+    API_KEY: str = os.getenv("POLYMARKET_API_KEY", os.getenv("API_KEY", ""))
+    API_SECRET: str = os.getenv("POLYMARKET_SECRET", os.getenv("API_SECRET", ""))
+    API_PASSPHRASE: str = os.getenv("POLYMARKET_PASSPHRASE", os.getenv("API_PASSPHRASE", ""))
     CHAIN_ID: int = 137  # Polygon mainnet
 
     # API endpoints
