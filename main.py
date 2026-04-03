@@ -6,8 +6,9 @@ Scans active binary prediction markets on Polymarket and executes
 Dutch-book arbitrage (buy YES + NO when combined price < $1 - fee).
 
 Usage:
-    python main.py            # Run bot (respects DRY_RUN env var)
-    python main.py --scan-only  # Scan once and print opportunities, no orders
+    python main.py               # Run bot in real-time WebSocket mode
+    python main.py --poll        # Polling mode (REST every 10s, no WebSocket)
+    python main.py --scan-only   # Single scan and exit (no orders)
 
 Dashboard: http://localhost:5000 (auto-starts with bot)
 
@@ -47,11 +48,12 @@ def _handle_signal(sig, frame):
     _running = False
 
 
-async def run_bot(scan_only: bool = False) -> None:
+async def run_bot(scan_only: bool = False, poll_mode: bool = False) -> None:
     global _running
 
+    mode = "POLL" if (poll_mode or scan_only) else "WEBSOCKET"
     logger.info("=" * 60)
-    logger.info("Polymarket Arbitrage Bot starting")
+    logger.info("Polymarket Arbitrage Bot starting [{}]", mode)
     logger.info("DRY_RUN={} | MIN_PROFIT={:.1f}% | MAX_SIZE={} USDC",
                 config.DRY_RUN, config.MIN_PROFIT_THRESHOLD * 100, config.MAX_ORDER_SIZE_USDC)
     logger.info("=" * 60)
@@ -72,7 +74,6 @@ async def run_bot(scan_only: bool = False) -> None:
 
     client = PolymarketClient()
     strategy = DutchBookStrategy()
-    scanner = MarketScanner(client, strategy)
     order_manager = OrderManager(client)
 
     if not config.DRY_RUN:
@@ -82,64 +83,99 @@ async def run_bot(scan_only: bool = False) -> None:
             logger.error("Balance too low to trade. Deposit USDC on Polygon first.")
             sys.exit(1)
 
-    scan_count = 0
-
-    while _running:
-        scan_count += 1
-        order_manager.stats.scans = scan_count
-
-        try:
-            opportunities = await scanner.scan()
-            set_meta(config.DRY_RUN, len(scanner._markets_cache))
+    # ------------------------------------------------------------------
+    # Real-time WebSocket mode (default)
+    # ------------------------------------------------------------------
+    if not poll_mode and not scan_only:
+        async def on_opportunity(opp):
+            if not _running:
+                return
+            add_opportunity(opp)
+            await telegram.notify_opportunity(opp)
+            result = order_manager.execute(opp)
+            add_trade(result)
+            await telegram.notify_trade(result)
             update_stats(order_manager.stats)
+            set_meta(config.DRY_RUN, len(scanner._markets))
 
-            for opp in opportunities:
-                if not _running:
-                    break
-                add_opportunity(opp)
-                await telegram.notify_opportunity(opp)
+        scanner = MarketScanner(client, strategy, on_opportunity=on_opportunity)
 
-                result = order_manager.execute(opp)
-                add_trade(result)
-                await telegram.notify_trade(result)
+        # Dashboard/stats updater in background
+        async def stats_loop():
+            scan_count = 0
+            while _running:
+                await asyncio.sleep(10)
+                scan_count += 1
+                set_meta(config.DRY_RUN, len(scanner._markets))
+                update_stats(order_manager.stats)
+                if scan_count % 100 == 0:
+                    order_manager.log_stats()
+                    await telegram.notify_stats(order_manager.stats)
 
-            update_stats(order_manager.stats)
+        await asyncio.gather(
+            scanner.start_realtime(),
+            stats_loop(),
+        )
 
-            if scan_count % 10 == 0:
-                order_manager.log_stats()
+    # ------------------------------------------------------------------
+    # Polling / scan-only mode (fallback)
+    # ------------------------------------------------------------------
+    else:
+        scanner = MarketScanner(client, strategy)
+        scan_count = 0
 
-            # Send Telegram stats every 100 scans (~16 min)
-            if scan_count % 100 == 0:
-                await telegram.notify_stats(order_manager.stats)
+        while _running:
+            scan_count += 1
+            order_manager.stats.scans = scan_count
 
-        except Exception as exc:
-            logger.error("Error during scan #{}: {}", scan_count, exc)
-            add_error(str(exc))
+            try:
+                opportunities = await scanner.scan()
+                set_meta(config.DRY_RUN, len(scanner._markets))
+                update_stats(order_manager.stats)
 
-        if scan_only:
-            logger.info("--scan-only mode: exiting after one scan")
-            break
+                for opp in opportunities:
+                    if not _running:
+                        break
+                    add_opportunity(opp)
+                    await telegram.notify_opportunity(opp)
+                    result = order_manager.execute(opp)
+                    add_trade(result)
+                    await telegram.notify_trade(result)
 
-        await asyncio.sleep(config.SCAN_INTERVAL_SECONDS)
+                update_stats(order_manager.stats)
+
+                if scan_count % 10 == 0:
+                    order_manager.log_stats()
+                if scan_count % 100 == 0:
+                    await telegram.notify_stats(order_manager.stats)
+
+            except Exception as exc:
+                logger.error("Error during scan #{}: {}", scan_count, exc)
+                add_error(str(exc))
+
+            if scan_only:
+                logger.info("--scan-only: exiting after one scan")
+                break
+
+            await asyncio.sleep(config.SCAN_INTERVAL_SECONDS)
 
     order_manager.log_stats()
     await telegram.notify_stats(order_manager.stats)
-    logger.info("Bot stopped after {} scans", scan_count)
+    logger.info("Bot stopped")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Polymarket Arbitrage Bot")
-    parser.add_argument(
-        "--scan-only",
-        action="store_true",
-        help="Scan once for opportunities and exit (no orders placed)",
-    )
+    parser.add_argument("--scan-only", action="store_true",
+                        help="Scan once and exit (no orders)")
+    parser.add_argument("--poll", action="store_true",
+                        help="Use REST polling instead of WebSocket")
     args = parser.parse_args()
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    asyncio.run(run_bot(scan_only=args.scan_only))
+    asyncio.run(run_bot(scan_only=args.scan_only, poll_mode=args.poll))
 
 
 if __name__ == "__main__":
