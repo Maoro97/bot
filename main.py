@@ -9,6 +9,8 @@ Usage:
     python main.py            # Run bot (respects DRY_RUN env var)
     python main.py --scan-only  # Scan once and print opportunities, no orders
 
+Dashboard: http://localhost:5000 (auto-starts with bot)
+
 Requirements:
     Copy .env.example to .env and fill in your credentials.
     pip install -r requirements.txt
@@ -16,13 +18,23 @@ Requirements:
 
 import argparse
 import asyncio
+import os
 import signal
 import sys
 
 from client.polymarket import PolymarketClient
 from config import config
+from dashboard.app import (
+    add_error,
+    add_opportunity,
+    add_trade,
+    set_meta,
+    start_dashboard,
+    update_stats,
+)
 from execution.order_manager import OrderManager
 from monitoring.market_scanner import MarketScanner
+from notifications.telegram_bot import TelegramNotifier
 from strategies.dutch_book import DutchBookStrategy
 from utils.logger import logger
 
@@ -50,6 +62,14 @@ async def run_bot(scan_only: bool = False) -> None:
         logger.error("Configuration error: {}", e)
         sys.exit(1)
 
+    # Start web dashboard
+    dashboard_port = int(os.getenv("PORT", "5000"))
+    start_dashboard(port=dashboard_port)
+
+    # Telegram notifications
+    telegram = TelegramNotifier()
+    await telegram.notify_startup(config.DRY_RUN)
+
     client = PolymarketClient()
     strategy = DutchBookStrategy()
     scanner = MarketScanner(client, strategy)
@@ -70,17 +90,31 @@ async def run_bot(scan_only: bool = False) -> None:
 
         try:
             opportunities = await scanner.scan()
+            set_meta(config.DRY_RUN, len(scanner._markets_cache))
+            update_stats(order_manager.stats)
 
             for opp in opportunities:
                 if not _running:
                     break
-                order_manager.execute(opp)
+                add_opportunity(opp)
+                await telegram.notify_opportunity(opp)
+
+                result = order_manager.execute(opp)
+                add_trade(result)
+                await telegram.notify_trade(result)
+
+            update_stats(order_manager.stats)
 
             if scan_count % 10 == 0:
                 order_manager.log_stats()
 
+            # Send Telegram stats every 100 scans (~16 min)
+            if scan_count % 100 == 0:
+                await telegram.notify_stats(order_manager.stats)
+
         except Exception as exc:
             logger.error("Error during scan #{}: {}", scan_count, exc)
+            add_error(str(exc))
 
         if scan_only:
             logger.info("--scan-only mode: exiting after one scan")
@@ -89,6 +123,7 @@ async def run_bot(scan_only: bool = False) -> None:
         await asyncio.sleep(config.SCAN_INTERVAL_SECONDS)
 
     order_manager.log_stats()
+    await telegram.notify_stats(order_manager.stats)
     logger.info("Bot stopped after {} scans", scan_count)
 
 
