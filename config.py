@@ -17,10 +17,10 @@ class Config:
     GAMMA_HOST: str = "https://gamma-api.polymarket.com"
 
     # Trading parameters
-    MIN_PROFIT_THRESHOLD: float = float(os.getenv("MIN_PROFIT_THRESHOLD", "0.02"))
+    MIN_PROFIT_THRESHOLD: float = float(os.getenv("MIN_PROFIT_THRESHOLD", "0.005"))
     MAX_ORDER_SIZE_USDC: float = float(os.getenv("MAX_ORDER_SIZE_USDC", "50"))
     SCAN_INTERVAL_SECONDS: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "10"))
-    MIN_LIQUIDITY: float = float(os.getenv("MIN_LIQUIDITY", "100"))
+    MIN_LIQUIDITY: float = float(os.getenv("MIN_LIQUIDITY", "10"))
 
     # Polymarket charges ~2% fee on winnings
     POLYMARKET_FEE: float = 0.02
