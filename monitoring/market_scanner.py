@@ -135,7 +135,7 @@ class MarketScanner:
             return None
 
         prices = MarketPrices(
-            condition_id=market.get("conditionId", ""),
+            condition_id=market.get("conditionId") or market.get("condition_id") or market.get("id", ""),
             yes_token_id=yes_id,
             no_token_id=no_id,
             yes_ask=yes_ask,
@@ -153,19 +153,29 @@ class MarketScanner:
     async def _refresh_markets(self) -> None:
         try:
             markets_list = await self._client.get_active_markets()
-            self._markets = {m.get("conditionId", ""): m for m in markets_list}
+
+            # Handle both camelCase and snake_case condition ID field names
+            def get_condition_id(m: dict) -> str:
+                return m.get("conditionId") or m.get("condition_id") or m.get("id", "")
+
+            self._markets = {}
+            for m in markets_list:
+                cid = get_condition_id(m)
+                if cid:
+                    self._markets[cid] = m
 
             # Build price cache and reverse lookup
             for m in markets_list:
+                cid = get_condition_id(m)
                 for t in m.get("tokens", []):
                     tid = t.get("token_id") or t.get("tokenId", "")
                     if tid:
-                        self._token_to_market[tid] = m.get("conditionId", "")
+                        self._token_to_market[tid] = cid
                         if tid not in self._prices:
                             self._prices[tid] = (None, None)
 
             self._last_market_refresh = time.time()
-            logger.info("Markets refreshed: {} loaded", len(self._markets))
+            logger.info("Markets refreshed: {} loaded (from {})", len(self._markets), len(markets_list))
 
             # Update WebSocket subscriptions if active
             if self._ws_feed:
