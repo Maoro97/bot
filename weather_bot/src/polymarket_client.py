@@ -145,82 +145,150 @@ class PolymarketClient:
 
     # ── market discovery (public, no credentials) ─────────────────────────────
 
+    # City name -> list of slug variants to try (Polymarket slugifies city names)
+    _CITY_SLUGS: dict[str, list[str]] = {
+        "London":     ["london"],
+        "NYC":        ["new-york-city", "new-york", "nyc"],
+        "Hong Kong":  ["hong-kong"],
+        "Seoul":      ["seoul"],
+        "Tokyo":      ["tokyo"],
+        "Paris":      ["paris"],
+        "Berlin":     ["berlin"],
+        "Singapore":  ["singapore"],
+        "Sydney":     ["sydney"],
+        "Dubai":      ["dubai"],
+        "Chicago":    ["chicago"],
+        "Moscow":     ["moscow"],
+        "Istanbul":   ["istanbul"],
+        "Tel Aviv":   ["tel-aviv"],
+    }
+
     async def get_weather_markets(self) -> list[Market]:
         """
         Fetch active weather/temperature markets from Polymarket's public API.
 
-        Polymarket groups temperature buckets under an 'event' (e.g. 'Highest
-        temperature in Hong Kong on April 7?').  Each bucket is a separate
-        YES/NO market inside that event.  We call /events, then flatten each
-        event's sub-markets into one Market object with multiple buckets.
+        Tries three strategies in order:
+        1. Text search via the Gamma API _q / q parameter
+        2. Slug-based lookup constructing event slugs for known cities x next 4 days
+        3. Tag-based filtered page scan
+
+        Daily temperature markets ("Highest temperature in Hong Kong on April 7?")
+        group each temperature bucket as a sub-market inside the event.
         """
         markets: list[Market] = []
         seen: set[str] = set()
-        limit = 100
 
-        # Fetch events sorted by nearest end date — daily temperature markets
-        # expire every day so they surface first when sorted by end_date ASC.
-        for sort_param in [
-            {"order_by": "end_date", "ascending": "true"},
-            {"sort_by": "end_date", "order": "asc"},
-            {"orderBy": "endDate", "direction": "asc"},
-            {},  # fallback: no sort, just scan more pages
+        from datetime import timezone, timedelta as _td
+        today = datetime.now(timezone.utc).date()
+
+        # ── Strategy 1: text search ───────────────────────────────────────────
+        for search_param, search_term in [
+            ("_q", "highest temperature"),
+            ("q",  "highest temperature"),
+            ("_q", "temperature"),
+            ("q",  "temperature"),
         ]:
-            resp0 = await self._http.get(
-                f"{GAMMA_HOST}/events",
-                params={"active": "true", "closed": "false", "limit": 3, **sort_param},
-            )
-            sample = resp0.json()
-            items0 = sample if isinstance(sample, list) else sample.get("events", sample.get("data", []))
-            if items0:
-                titles = [e.get("title", "") for e in items0]
-                logger.info("sort=%s -> titles: %s", sort_param, titles)
-            break  # just log the first one to see the order
-
-        for page in range(30):
             try:
                 resp = await self._http.get(
                     f"{GAMMA_HOST}/events",
-                    params={
-                        "active": "true",
-                        "closed": "false",
-                        "limit": limit,
-                        "offset": page * limit,
-                    },
+                    params={search_param: search_term, "limit": 100, "active": "true"},
                 )
                 resp.raise_for_status()
                 data = resp.json()
+                events = data if isinstance(data, list) else data.get("events", data.get("data", []))
+                if events:
+                    sample = [e.get("title", "?") for e in events[:3]]
+                    logger.info("Text search '%s'='%s' returned %d events, sample: %s",
+                                search_param, search_term, len(events), sample)
+                    for raw_event in events:
+                        title = raw_event.get("title", "") or raw_event.get("question", "")
+                        if "temperature" not in title.lower():
+                            continue
+                        try:
+                            market = self._parse_event(raw_event)
+                            if market and market.condition_id not in seen:
+                                markets.append(market)
+                                seen.add(market.condition_id)
+                        except Exception as exc:
+                            logger.debug("Parse error for '%s': %s", title, exc)
+                    if markets:
+                        logger.info("Strategy 1 (text search) found %d markets", len(markets))
+                        return markets
             except Exception as exc:
-                logger.warning("Events fetch error page=%d: %s", page, exc)
-                break
+                logger.debug("Text search %s='%s' failed: %s", search_param, search_term, exc)
 
-            events = data if isinstance(data, list) else data.get("events", data.get("data", []))
-            if not events:
-                break
+        # ── Strategy 2: slug-based lookup per city × date ────────────────────
+        slugs_tried = 0
+        for days_ahead in range(4):
+            target = today + _td(days=days_ahead)
+            month_name = target.strftime("%B").lower()   # "april"
+            day_num    = str(target.day)                  # "7" (no leading zero)
 
-            found_on_page = 0
-            for raw_event in events:
-                title = raw_event.get("title", "") or raw_event.get("question", "")
-                if "temperature" not in title.lower():
-                    continue
-                try:
-                    market = self._parse_event(raw_event)
-                    if market and market.condition_id not in seen:
-                        markets.append(market)
-                        seen.add(market.condition_id)
-                        found_on_page += 1
-                except Exception as exc:
-                    logger.debug("Skipping event '%s': %s", title, exc)
+            for city_name, slug_variants in self._CITY_SLUGS.items():
+                for city_slug in slug_variants:
+                    slug = f"highest-temperature-in-{city_slug}-on-{month_name}-{day_num}"
+                    try:
+                        resp = await self._http.get(
+                            f"{GAMMA_HOST}/events",
+                            params={"slug": slug},
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        events = data if isinstance(data, list) else data.get("events", data.get("data", []))
+                        slugs_tried += 1
+                        for raw_event in events:
+                            try:
+                                market = self._parse_event(raw_event)
+                                if market and market.condition_id not in seen:
+                                    markets.append(market)
+                                    seen.add(market.condition_id)
+                                    logger.info("Found market via slug '%s'", slug)
+                            except Exception as exc:
+                                logger.debug("Parse error for slug '%s': %s", slug, exc)
+                        if events:
+                            break  # found with this variant, skip the rest
+                    except Exception as exc:
+                        logger.debug("Slug '%s' failed: %s", slug, exc)
+                    await asyncio.sleep(0.03)  # light rate limiting
 
-            if found_on_page:
-                logger.info("Page %d: found %d temperature markets (total=%d)",
-                            page, found_on_page, len(markets))
-            if len(markets) >= 50:
-                break
-            if len(events) < limit:
-                break
+        if markets:
+            logger.info("Strategy 2 (slug lookup, %d slugs tried) found %d markets",
+                        slugs_tried, len(markets))
+            return markets
+        logger.info("Strategy 2: no markets found after trying %d slugs", slugs_tried)
 
-        logger.info("Found %d active weather markets", len(markets))
+        # ── Strategy 3: tag-based paginated scan ──────────────────────────────
+        for tag in ["daily-temperature", "temperature", "weather", "recurring"]:
+            found_tag = 0
+            try:
+                resp = await self._http.get(
+                    f"{GAMMA_HOST}/events",
+                    params={"tag": tag, "limit": 100, "active": "true"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                events = data if isinstance(data, list) else data.get("events", data.get("data", []))
+                if events:
+                    sample = [e.get("title", "?") for e in events[:3]]
+                    logger.info("Tag '%s' returned %d events, sample: %s", tag, len(events), sample)
+                    for raw_event in events:
+                        title = raw_event.get("title", "") or raw_event.get("question", "")
+                        if "temperature" not in title.lower():
+                            continue
+                        try:
+                            market = self._parse_event(raw_event)
+                            if market and market.condition_id not in seen:
+                                markets.append(market)
+                                seen.add(market.condition_id)
+                                found_tag += 1
+                        except Exception as exc:
+                            logger.debug("Parse error '%s': %s", title, exc)
+            except Exception as exc:
+                logger.debug("Tag '%s' scan failed: %s", tag, exc)
+            if found_tag:
+                logger.info("Strategy 3 tag='%s' found %d markets", tag, found_tag)
+
+        logger.info("Found %d active weather markets total", len(markets))
         return markets
 
     def _parse_event(self, event: dict) -> Optional[Market]:
