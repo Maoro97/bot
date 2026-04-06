@@ -30,6 +30,11 @@ from .src.risk_manager import RiskManager
 from .src.trade_executor import TradeExecutor
 from .src.telegram_bot import TelegramReporter
 
+# Reconfigure stdout to UTF-8 on Windows where the default codepage may not
+# support Unicode characters (e.g. cp1252, cp1255).
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Ensure data directories exist before setting up file logging
 Path("data/trades").mkdir(parents=True, exist_ok=True)
 Path("data/calibration").mkdir(parents=True, exist_ok=True)

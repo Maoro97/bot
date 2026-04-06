@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 _RANGE_RE   = re.compile(r"([-\d]+)\s*[°℃C]\s*[-–]\s*([-\d]+)\s*[°℃C]")  # "18°C - 20°C"
 _ABOVE_RE   = re.compile(r"(?:≥|>=|above|over)\s*([-\d]+)\s*[°℃C]", re.I)
 _BELOW_RE   = re.compile(r"(?:≤|<=|below|under)\s*([-\d]+)\s*[°℃C]", re.I)
-_EXACT_RE   = re.compile(r"^([-\d]+)\s*[°℃C]$")
+_EXACT_RE   = re.compile(r"^([-\d]+)\s*(?:°\s*[Cc]|℃)$")
 
 WEATHER_KEYWORDS = {"temperature", "temp", "°c", "celsius", "high", "low", "weather"}
 
@@ -50,7 +50,7 @@ def _parse_bucket(label: str, token_id: str) -> TemperatureBucket:
         return TemperatureBucket(label=label, low=mid - 0.5, high=mid + 0.5, token_id=token_id)
 
     # Fallback: treat as ±inf (catches unexpected formats gracefully)
-    logger.warning("Could not parse bucket label '%s' — treating as (-∞, +∞)", label)
+    logger.warning("Could not parse bucket label '%s' -- treating as (-inf, +inf)", label)
     return TemperatureBucket(label=label, low=-math.inf, high=math.inf, token_id=token_id)
 
 
