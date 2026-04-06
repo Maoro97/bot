@@ -181,7 +181,7 @@ class Backtester:
         )
 
         logger.info(
-            "Backtest %s→%s: trades=%d win_rate=%.1f%% pnl=$%.2f roi=%.1f%% "
+            "Backtest %s->%s: trades=%d win_rate=%.1f%% pnl=$%.2f roi=%.1f%% "
             "maxDD=%.1f%% sharpe=%.2f brier=%.3f",
             start_date, end_date, total, win_rate*100, total_pnl,
             roi_pct, max_dd*100, sharpe, brier,

@@ -97,7 +97,7 @@ class TradeExecutor:
 
         # 5. Cancel if not filled
         if filled_order.status not in ("MATCHED", "FILLED"):
-            logger.info("Order %s not filled after %ds — cancelling", order.order_id, FILL_TIMEOUT)
+            logger.info("Order %s not filled after %ds - cancelling", order.order_id, FILL_TIMEOUT)
             await self._client.cancel_order(order.order_id)
             filled_order.status = "CANCELLED"
             result = TradeResult(signal=signal, order=filled_order, success=False,

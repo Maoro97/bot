@@ -82,21 +82,21 @@ class EdgeDetector:
         """
         if market.volume < self.min_volume:
             logger.debug(
-                "Skipping %s — volume $%.0f below threshold",
+                "Skipping %s - volume $%.0f below threshold",
                 market.question[:60], market.volume
             )
             return []
 
         if spread > self.max_spread:
             logger.debug(
-                "Skipping %s — spread %.3f above threshold",
+                "Skipping %s - spread %.3f above threshold",
                 market.question[:60], spread
             )
             return []
 
         if model_agreement < self.min_model_agreement:
             logger.debug(
-                "Skipping %s — model agreement %.2f below threshold",
+                "Skipping %s - model agreement %.2f below threshold",
                 market.question[:60], model_agreement
             )
             return []
@@ -125,7 +125,7 @@ class EdgeDetector:
                 # On Polymarket you can short by buying the complementary token,
                 # but for simplicity we skip direct shorting here.
                 # A negative-edge bucket means the complementary bucket is +edge.
-                logger.debug("Negative edge on %s — will catch via complementary bucket", label)
+                logger.debug("Negative edge on %s - will catch via complementary bucket", label)
                 continue
             else:
                 continue
