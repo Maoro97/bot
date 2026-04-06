@@ -158,24 +158,42 @@ class PolymarketClient:
         seen: set[str] = set()
         limit = 100
 
-        # Try different tag filter parameter names against the Gamma API
+        def _parse_items(r):
+            d = r.json()
+            return d if isinstance(d, list) else d.get("events", d.get("data", []))
+
+        # Find the tag that returns actual temperature-bucket events (sub-markets with "28°C" etc.)
         tag_filter: dict = {}
-        for tp in [{"tag": "weather"}, {"tag": "daily-temperature"},
-                   {"tag_slug": "weather"}, {"tag_slug": "daily-temperature"},
-                   {"slug": "weather"}]:
+        fallback_filter: dict = {}
+        for tp in [
+            {"tag": "daily-temperature"},
+            {"tag": "Daily Temperature"},
+            {"tag": "recurring"},
+            {"tag": "weather"},
+        ]:
             try:
                 test = await self._http.get(
                     f"{GAMMA_HOST}/events",
-                    params={"active": "true", "closed": "false", "limit": 2, **tp},
+                    params={"active": "true", "closed": "false", "limit": 5, **tp},
                 )
-                items = test.json() if isinstance(test.json(), list) else test.json().get("data", [])
-                if items:
+                items = _parse_items(test)
+                has_temp = any(
+                    any(re.search(r"\d+\s*°", sm.get("question", ""))
+                        for sm in ev.get("markets", []))
+                    for ev in items
+                )
+                logger.info("Tag %s: %d events, temperature_markets=%s", tp, len(items), has_temp)
+                if has_temp:
                     tag_filter = tp
-                    logger.info("Tag filter %s works (%d results)", tp, len(items))
                     break
-                logger.info("Tag filter %s: 0 results", tp)
-            except Exception:
-                pass
+                if items and not fallback_filter:
+                    fallback_filter = tp
+            except Exception as exc:
+                logger.info("Tag %s: error %s", tp, exc)
+
+        if not tag_filter:
+            tag_filter = fallback_filter
+        logger.info("Using tag filter: %s", tag_filter)
 
         for page in range(20):
             try:
