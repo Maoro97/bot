@@ -182,18 +182,31 @@ class PolymarketClient:
                 logger.info("Page %d: empty response, stopping", page)
                 break
 
-            # Log a sample of titles on first page so we can verify API is working
-            if page == 0:
-                sample = [e.get("title") or e.get("question", "?") for e in events[:5]]
-                logger.info("Page 0 sample titles: %s", sample)
-                logger.info("Page 0 event keys: %s", list(events[0].keys()) if events else [])
+            # Log tag structure from first event to help diagnose filter issues
+            if page == 0 and events:
+                raw_tags = events[0].get("tags", [])
+                logger.info("Tag structure sample: %s", str(raw_tags)[:300])
 
             for raw_event in events:
                 title = raw_event.get("title", "") or raw_event.get("question", "")
-                # Quick pre-filter: skip events with no temperature keyword
-                if not any(kw in title.lower() for kw in ("temperature", "temp", "celsius", "highest")):
+                title_lower = title.lower()
+
+                # Check title keywords (strict — avoid "attempt", "Temple", "Tempo")
+                title_match = "temperature" in title_lower or "celsius" in title_lower
+
+                # Also check event tags for weather/temperature labels
+                raw_tags = raw_event.get("tags", [])
+                tag_labels = set()
+                for t in raw_tags:
+                    if isinstance(t, dict):
+                        tag_labels.add(t.get("label", t.get("slug", "")).lower())
+                    else:
+                        tag_labels.add(str(t).lower())
+                tag_match = bool(tag_labels & {"weather", "temperature", "daily temperature",
+                                               "daily-temperature", "climate"})
+
+                if not (title_match or tag_match):
                     continue
-                logger.info("Matched temperature event: '%s'", title)
                 try:
                     market = self._parse_event(raw_event)
                     if market and market.condition_id not in seen:
