@@ -360,9 +360,15 @@ async def _async_main(args):
 
     bot = WeatherBot(config, locations, paper_trade=not args.live)
 
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, bot.stop)
+    # add_signal_handler is Unix-only; on Windows use signal.signal instead
+    try:
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, bot.stop)
+    except NotImplementedError:
+        signal.signal(signal.SIGINT, lambda *_: bot.stop())
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, lambda *_: bot.stop())
 
     await bot.run()
 
