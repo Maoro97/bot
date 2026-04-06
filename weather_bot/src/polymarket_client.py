@@ -158,43 +158,48 @@ class PolymarketClient:
         seen: set[str] = set()
         limit = 100
 
-        # Use tag-based filtering — these match the tags visible on
-        # polymarket.com/predictions/weather
-        for tag in ("daily-temperature", "weather"):
-            for page in range(10):
+        # Fetch active events — no server-side tag filter (tag slugs are
+        # undocumented); instead filter client-side by title keywords.
+        for page in range(20):
+            try:
+                resp = await self._http.get(
+                    f"{GAMMA_HOST}/events",
+                    params={
+                        "active": "true",
+                        "closed": "false",
+                        "limit": limit,
+                        "offset": page * limit,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as exc:
+                logger.warning("Failed to fetch events (page=%d): %s", page, exc)
+                break
+
+            events = data if isinstance(data, list) else data.get("events", data.get("data", []))
+            if not events:
+                break
+
+            for raw_event in events:
+                title = raw_event.get("title", "") or raw_event.get("question", "")
+                # Quick pre-filter: skip events with no temperature keyword
+                if not any(kw in title.lower() for kw in ("temperature", "temp", "celsius", "highest")):
+                    continue
                 try:
-                    resp = await self._http.get(
-                        f"{GAMMA_HOST}/events",
-                        params={
-                            "active": "true",
-                            "closed": "false",
-                            "limit": limit,
-                            "offset": page * limit,
-                            "tag_slug": tag,
-                        },
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
+                    market = self._parse_event(raw_event)
+                    if market and market.condition_id not in seen:
+                        markets.append(market)
+                        seen.add(market.condition_id)
                 except Exception as exc:
-                    logger.warning("Failed to fetch events (tag=%s page=%d): %s",
-                                   tag, page, exc)
-                    break
+                    logger.debug("Skipping event '%s': %s", title, exc)
 
-                events = data if isinstance(data, list) else data.get("events", data.get("data", []))
-                if not events:
-                    break
+            if len(events) < limit:
+                break
 
-                for raw_event in events:
-                    try:
-                        market = self._parse_event(raw_event)
-                        if market and market.condition_id not in seen:
-                            markets.append(market)
-                            seen.add(market.condition_id)
-                    except Exception as exc:
-                        logger.debug("Skipping event: %s", exc)
-
-                if len(events) < limit:
-                    break
+            # Stop early once we have a good batch
+            if len(markets) >= 50:
+                break
 
         logger.info("Found %d active weather markets", len(markets))
         return markets
@@ -222,6 +227,7 @@ class PolymarketClient:
 
         sub_markets: list[dict] = event.get("markets", []) or []
         if not sub_markets:
+            logger.debug("Event '%s' has no sub-markets", title)
             return None
 
         buckets: list[TemperatureBucket] = []
@@ -252,6 +258,8 @@ class PolymarketClient:
                 prices[label] = price
 
         if not buckets:
+            logger.debug("Event '%s' - no temperature buckets parsed from %d sub-markets",
+                         title, len(sub_markets))
             return None
 
         location_name = _extract_location(title, self.KNOWN_LOCATIONS) or "Unknown"
