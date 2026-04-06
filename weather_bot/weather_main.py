@@ -39,16 +39,21 @@ if hasattr(sys.stdout, "reconfigure"):
 Path("data/trades").mkdir(parents=True, exist_ok=True)
 Path("data/calibration").mkdir(parents=True, exist_ok=True)
 Path("data/pnl").mkdir(parents=True, exist_ok=True)
+Path("data/logs").mkdir(parents=True, exist_ok=True)
+
+_run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+_log_file = Path("data/logs") / f"run_{_run_ts}.log"
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("data/weather_bot.log"),
+        logging.FileHandler(str(_log_file), encoding="utf-8"),
     ],
 )
 logger = logging.getLogger(__name__)
+logger.info("Log file: %s", _log_file)
 
 # ── GFS / ECMWF update hours (UTC) ──────────────────────────────────────────
 MODEL_UPDATE_HOURS = {0, 6, 12, 18}
