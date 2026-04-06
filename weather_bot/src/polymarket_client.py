@@ -158,114 +158,54 @@ class PolymarketClient:
         seen: set[str] = set()
         limit = 100
 
-        def _parse_items(r):
-            d = r.json()
-            return d if isinstance(d, list) else d.get("events", d.get("data", []))
-
-        # Find the tag that returns actual temperature-bucket events (sub-markets with "28°C" etc.)
-        tag_filter: dict = {}
-        fallback_filter: dict = {}
-        for tp in [
-            {"tag": "daily-temperature"},
-            {"tag": "Daily Temperature"},
-            {"tag": "recurring"},
-            {"tag": "weather"},
-        ]:
-            try:
-                test = await self._http.get(
-                    f"{GAMMA_HOST}/events",
-                    params={"active": "true", "closed": "false", "limit": 5, **tp},
-                )
-                items = _parse_items(test)
-                has_temp = any(
-                    any(re.search(r"\d+\s*°", sm.get("question", ""))
-                        for sm in ev.get("markets", []))
-                    for ev in items
-                )
-                logger.info("Tag %s: %d events, temperature_markets=%s", tp, len(items), has_temp)
-                if has_temp:
-                    tag_filter = tp
-                    break
-                if items and not fallback_filter:
-                    fallback_filter = tp
-            except Exception as exc:
-                logger.info("Tag %s: error %s", tp, exc)
-
-        if not tag_filter:
-            tag_filter = fallback_filter
-        logger.info("Using tag filter: %s", tag_filter)
-
-        for page in range(20):
-            try:
-                resp = await self._http.get(
-                    f"{GAMMA_HOST}/events",
-                    params={
-                        "active": "true",
-                        "closed": "false",
-                        "limit": limit,
-                        "offset": page * limit,
-                        **tag_filter,
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as exc:
-                logger.warning("Failed to fetch events (page=%d): %s", page, exc)
-                break
-
-            events = data if isinstance(data, list) else data.get("events", data.get("data", []))
-            if not events:
-                logger.info("Page %d: empty, stopping", page)
-                break
-
-            for raw_event in events:
-                title = raw_event.get("title", "") or raw_event.get("question", "")
-                title_lower = title.lower()
-
-                # Check title keywords (strict — avoid "attempt", "Temple", "Tempo")
-                title_match = "temperature" in title_lower or "celsius" in title_lower
-
-                # Also check event tags for weather/temperature labels
-                raw_tags = raw_event.get("tags", [])
-                tag_labels = set()
-                for t in raw_tags:
-                    if isinstance(t, dict):
-                        tag_labels.add(t.get("label", t.get("slug", "")).lower())
-                    else:
-                        tag_labels.add(str(t).lower())
-                tag_match = bool(tag_labels & {"weather", "temperature", "daily temperature",
-                                               "daily-temperature", "climate"})
-
-                if not (title_match or tag_match):
-                    continue
-                logger.info("Processing event: '%s' (end=%s, subs=%d)",
-                            title,
-                            raw_event.get("endDate", "?"),
-                            len(raw_event.get("markets", [])))
-                # Log first sub-market structure
-                subs = raw_event.get("markets", [])
-                if subs:
-                    sm = subs[0]
-                    logger.info("  Sub-market sample: question='%s' clobTokenIds=%s outcomePrices=%s",
-                                sm.get("question", sm.get("title", "?")),
-                                sm.get("clobTokenIds", []),
-                                sm.get("outcomePrices", []))
+        # Daily temperature markets on Polymarket are individual YES/NO CLOB markets
+        # grouped by event. Search the Gamma /markets endpoint by question keyword.
+        for keyword in ("Highest temperature", "highest temperature"):
+            for page in range(10):
                 try:
-                    market = self._parse_event(raw_event)
-                    if market and market.condition_id not in seen:
-                        markets.append(market)
-                        seen.add(market.condition_id)
-                    elif not market:
-                        logger.info("  -> filtered out by _parse_event")
+                    resp = await self._http.get(
+                        f"{GAMMA_HOST}/markets",
+                        params={
+                            "active": "true",
+                            "closed": "false",
+                            "limit": limit,
+                            "offset": page * limit,
+                            "question": keyword,
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
                 except Exception as exc:
-                    logger.info("  -> exception: %s", exc)
+                    logger.warning("Markets fetch error (keyword=%s page=%d): %s",
+                                   keyword, page, exc)
+                    break
 
-            if len(events) < limit:
-                break
+                raw_markets = data if isinstance(data, list) else data.get("markets", data.get("data", []))
+                if not raw_markets:
+                    logger.info("keyword='%s' page=%d: empty", keyword, page)
+                    break
 
-            # Stop early once we have a good batch
-            if len(markets) >= 50:
-                break
+                logger.info("keyword='%s' page=%d: %d markets, sample='%s'",
+                            keyword, page, len(raw_markets),
+                            raw_markets[0].get("question", "?") if raw_markets else "")
+
+                # Group individual YES/NO markets by their groupItemTitle (event title)
+                for rm in raw_markets:
+                    q = rm.get("question", "")
+                    if not re.search(r"\d+\s*°", q):
+                        continue  # skip non-temperature markets
+                    try:
+                        m = self._parse_market(rm)
+                        if m and m.condition_id not in seen:
+                            markets.append(m)
+                            seen.add(m.condition_id)
+                    except Exception as exc:
+                        logger.debug("Skipping market '%s': %s", q, exc)
+
+                if len(raw_markets) < limit:
+                    break
+            if markets:
+                break  # found markets with first keyword, skip duplicate search
 
         logger.info("Found %d active weather markets", len(markets))
         return markets
