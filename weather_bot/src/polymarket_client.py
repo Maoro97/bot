@@ -158,8 +158,25 @@ class PolymarketClient:
         seen: set[str] = set()
         limit = 100
 
-        # Fetch active events — no server-side tag filter (tag slugs are
-        # undocumented); instead filter client-side by title keywords.
+        # Try different tag filter parameter names against the Gamma API
+        tag_filter: dict = {}
+        for tp in [{"tag": "weather"}, {"tag": "daily-temperature"},
+                   {"tag_slug": "weather"}, {"tag_slug": "daily-temperature"},
+                   {"slug": "weather"}]:
+            try:
+                test = await self._http.get(
+                    f"{GAMMA_HOST}/events",
+                    params={"active": "true", "closed": "false", "limit": 2, **tp},
+                )
+                items = test.json() if isinstance(test.json(), list) else test.json().get("data", [])
+                if items:
+                    tag_filter = tp
+                    logger.info("Tag filter %s works (%d results)", tp, len(items))
+                    break
+                logger.info("Tag filter %s: 0 results", tp)
+            except Exception:
+                pass
+
         for page in range(20):
             try:
                 resp = await self._http.get(
@@ -169,6 +186,7 @@ class PolymarketClient:
                         "closed": "false",
                         "limit": limit,
                         "offset": page * limit,
+                        **tag_filter,
                     },
                 )
                 resp.raise_for_status()
@@ -179,13 +197,8 @@ class PolymarketClient:
 
             events = data if isinstance(data, list) else data.get("events", data.get("data", []))
             if not events:
-                logger.info("Page %d: empty response, stopping", page)
+                logger.info("Page %d: empty, stopping", page)
                 break
-
-            # Log tag structure from first event to help diagnose filter issues
-            if page == 0 and events:
-                raw_tags = events[0].get("tags", [])
-                logger.info("Tag structure sample: %s", str(raw_tags)[:300])
 
             for raw_event in events:
                 title = raw_event.get("title", "") or raw_event.get("question", "")
