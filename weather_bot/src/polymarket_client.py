@@ -179,13 +179,21 @@ class PolymarketClient:
 
             events = data if isinstance(data, list) else data.get("events", data.get("data", []))
             if not events:
+                logger.info("Page %d: empty response, stopping", page)
                 break
+
+            # Log a sample of titles on first page so we can verify API is working
+            if page == 0:
+                sample = [e.get("title") or e.get("question", "?") for e in events[:5]]
+                logger.info("Page 0 sample titles: %s", sample)
+                logger.info("Page 0 event keys: %s", list(events[0].keys()) if events else [])
 
             for raw_event in events:
                 title = raw_event.get("title", "") or raw_event.get("question", "")
                 # Quick pre-filter: skip events with no temperature keyword
                 if not any(kw in title.lower() for kw in ("temperature", "temp", "celsius", "highest")):
                     continue
+                logger.info("Matched temperature event: '%s'", title)
                 try:
                     market = self._parse_event(raw_event)
                     if market and market.condition_id not in seen:
