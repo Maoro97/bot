@@ -146,42 +146,47 @@ class PolymarketClient:
     async def get_weather_markets(self) -> list[Market]:
         """Fetch active weather/temperature markets from Polymarket's public API."""
         markets: list[Market] = []
-        offset = 0
-        limit = 100
 
-        while True:
-            try:
-                resp = await self._http.get(
-                    f"{GAMMA_HOST}/markets",
-                    params={
-                        "active": "true",
-                        "closed": "false",
-                        "limit": limit,
-                        "offset": offset,
-                        "tag_slug": "weather",
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as exc:
-                logger.warning("Failed to fetch markets (offset=%d): %s", offset, exc)
-                break
-
-            items = data if isinstance(data, list) else data.get("markets", data.get("data", []))
-            if not items:
-                break
-
-            for raw in items:
+        # Try multiple keyword searches to catch all weather/temperature markets
+        for keyword in ("temperature", "weather", "celsius"):
+            offset = 0
+            limit = 100
+            while True:
                 try:
-                    market = self._parse_market(raw)
-                    if market:
-                        markets.append(market)
+                    resp = await self._http.get(
+                        f"{GAMMA_HOST}/markets",
+                        params={
+                            "active": "true",
+                            "closed": "false",
+                            "limit": limit,
+                            "offset": offset,
+                            "question": keyword,
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
                 except Exception as exc:
-                    logger.debug("Skipping market: %s", exc)
+                    logger.warning("Failed to fetch markets (keyword=%s offset=%d): %s",
+                                   keyword, offset, exc)
+                    break
 
-            if len(items) < limit:
-                break
-            offset += limit
+                items = data if isinstance(data, list) else data.get("markets", data.get("data", []))
+                if not items:
+                    break
+
+                seen = {m.condition_id for m in markets}
+                for raw in items:
+                    try:
+                        market = self._parse_market(raw)
+                        if market and market.condition_id not in seen:
+                            markets.append(market)
+                            seen.add(market.condition_id)
+                    except Exception as exc:
+                        logger.debug("Skipping market: %s", exc)
+
+                if len(items) < limit:
+                    break
+                offset += limit
 
         logger.info("Found %d active weather markets", len(markets))
         return markets

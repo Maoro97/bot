@@ -207,8 +207,11 @@ class TradeExecutor:
     async def monitor_fills(self, interval: float = 10.0):
         """
         Continuously polls open positions and logs P&L changes.
-        Intended to run as a background task.
+        Skipped in paper trading mode (no real positions exist).
         """
+        if self.paper_trade:
+            logger.info("Paper mode - position monitor disabled")
+            return
         logger.info("Starting position monitor (interval=%ds)", interval)
         while True:
             try:
