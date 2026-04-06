@@ -1,0 +1,41 @@
+# Polymarket Weather Bot — Settings
+# Copy to settings.local.yaml and fill in secrets; never commit secrets.
+
+# ── Trading parameters ────────────────────────────────────────────────────
+min_edge: 0.10              # minimum model_prob - market_price to open a trade
+min_kelly: 0.02             # minimum Kelly fraction
+min_volume: 500.0           # minimum market volume (USD)
+max_spread: 0.05            # maximum bid-ask spread
+min_model_agreement: 0.60   # models must agree at least this much
+
+# ── Risk limits ───────────────────────────────────────────────────────────
+max_bet_size: 3.0           # max USD per individual bet
+max_daily_exposure: 50.0    # max total USD wagered per day
+max_market_exposure: 10.0   # max USD in a single market
+stop_loss_daily: 20.0       # halt trading if daily loss exceeds this
+
+# ── Infrastructure ────────────────────────────────────────────────────────
+cache_ttl: 300              # seconds to cache weather API responses
+loop_interval: 300          # main loop interval in seconds
+calibration_dir: data/calibration
+risk_state_path: data/risk_state.json
+trade_log: data/trades/trades.jsonl
+
+# ── Polymarket API ────────────────────────────────────────────────────────
+polymarket:
+  chain_id: 137             # Polygon mainnet
+  # Secrets: set as environment variables (POLY_PRIVATE_KEY, POLY_API_KEY, etc.)
+  # or override in settings.local.yaml
+  private_key: ""
+  api_key: ""
+  api_secret: ""
+  api_passphrase: ""
+
+# ── Telegram ──────────────────────────────────────────────────────────────
+telegram:
+  token: ""       # BotFather token — set via TG_TOKEN env var
+  chat_id: ""     # Your Telegram user/chat ID — set via TG_CHAT_ID env var
+
+# ── Logging ───────────────────────────────────────────────────────────────
+log_level: INFO
+log_file: data/weather_bot.log
