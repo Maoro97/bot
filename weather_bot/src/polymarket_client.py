@@ -220,13 +220,27 @@ class PolymarketClient:
 
                 if not (title_match or tag_match):
                     continue
+                logger.info("Processing event: '%s' (end=%s, subs=%d)",
+                            title,
+                            raw_event.get("endDate", "?"),
+                            len(raw_event.get("markets", [])))
+                # Log first sub-market structure
+                subs = raw_event.get("markets", [])
+                if subs:
+                    sm = subs[0]
+                    logger.info("  Sub-market sample: question='%s' clobTokenIds=%s outcomePrices=%s",
+                                sm.get("question", sm.get("title", "?")),
+                                sm.get("clobTokenIds", []),
+                                sm.get("outcomePrices", []))
                 try:
                     market = self._parse_event(raw_event)
                     if market and market.condition_id not in seen:
                         markets.append(market)
                         seen.add(market.condition_id)
+                    elif not market:
+                        logger.info("  -> filtered out by _parse_event")
                 except Exception as exc:
-                    logger.debug("Skipping event '%s': %s", title, exc)
+                    logger.info("  -> exception: %s", exc)
 
             if len(events) < limit:
                 break
