@@ -52,7 +52,7 @@ def _parse_bucket(label: str, token_id: str) -> TemperatureBucket:
         mid = float(m.group(1))
         return TemperatureBucket(label=label, low=mid - 0.5, high=mid + 0.5, token_id=token_id)
 
-    logger.warning("Could not parse bucket label '%s' -- treating as (-inf, +inf)", label)
+    logger.debug("Could not parse bucket label '%s' -- skipping", label)
     return TemperatureBucket(label=label, low=-math.inf, high=math.inf, token_id=token_id)
 
 
@@ -158,7 +158,9 @@ class PolymarketClient:
         seen: set[str] = set()
         limit = 100
 
-        for keyword in ("highest temperature", "temperature"):
+        # Use tag-based filtering — these match the tags visible on
+        # polymarket.com/predictions/weather
+        for tag in ("daily-temperature", "weather"):
             for page in range(10):
                 try:
                     resp = await self._http.get(
@@ -168,14 +170,14 @@ class PolymarketClient:
                             "closed": "false",
                             "limit": limit,
                             "offset": page * limit,
-                            "_q": keyword,
+                            "tag_slug": tag,
                         },
                     )
                     resp.raise_for_status()
                     data = resp.json()
                 except Exception as exc:
-                    logger.warning("Failed to fetch events (keyword=%s page=%d): %s",
-                                   keyword, page, exc)
+                    logger.warning("Failed to fetch events (tag=%s page=%d): %s",
+                                   tag, page, exc)
                     break
 
                 events = data if isinstance(data, list) else data.get("events", data.get("data", []))
@@ -206,12 +208,7 @@ class PolymarketClient:
         YES token is what we trade.
         """
         title: str = event.get("title", "") or event.get("question", "")
-        tags: list[str] = []
-        raw_tags = event.get("tags", []) or []
-        for t in raw_tags:
-            tags.append(t.get("label", t.get("slug", str(t))) if isinstance(t, dict) else str(t))
-
-        if not _is_weather_market(title, tags):
+        if not title:
             return None
 
         end_date_str = event.get("endDate") or event.get("end_date", "")
