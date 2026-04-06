@@ -90,6 +90,8 @@ class PolymarketClient:
     KNOWN_LOCATIONS = [
         "London", "NYC", "New York", "Hong Kong", "Seoul", "Tokyo",
         "Paris", "Berlin", "Sydney", "Singapore", "Dubai", "Chicago",
+        "Moscow", "Istanbul", "Tel Aviv", "Bangkok", "Mumbai", "Cairo",
+        "Lagos", "Toronto", "Melbourne", "São Paulo", "Buenos Aires",
     ]
 
     def __init__(
@@ -144,50 +146,131 @@ class PolymarketClient:
     # ── market discovery (public, no credentials) ─────────────────────────────
 
     async def get_weather_markets(self) -> list[Market]:
-        """Fetch active weather/temperature markets from Polymarket's public API."""
+        """
+        Fetch active weather/temperature markets from Polymarket's public API.
+
+        Polymarket groups temperature buckets under an 'event' (e.g. 'Highest
+        temperature in Hong Kong on April 7?').  Each bucket is a separate
+        YES/NO market inside that event.  We call /events, then flatten each
+        event's sub-markets into one Market object with multiple buckets.
+        """
         markets: list[Market] = []
         seen: set[str] = set()
         limit = 100
-        max_pages = 5  # cap at 500 markets per keyword to avoid endless pagination
 
-        for keyword in ("temperature", "weather", "celsius"):
-            for page in range(max_pages):
+        for keyword in ("highest temperature", "temperature"):
+            for page in range(10):
                 try:
                     resp = await self._http.get(
-                        f"{GAMMA_HOST}/markets",
+                        f"{GAMMA_HOST}/events",
                         params={
                             "active": "true",
                             "closed": "false",
                             "limit": limit,
                             "offset": page * limit,
-                            "_q": keyword,        # Gamma API keyword search
+                            "_q": keyword,
                         },
                     )
                     resp.raise_for_status()
                     data = resp.json()
                 except Exception as exc:
-                    logger.warning("Failed to fetch markets (keyword=%s page=%d): %s",
+                    logger.warning("Failed to fetch events (keyword=%s page=%d): %s",
                                    keyword, page, exc)
                     break
 
-                items = data if isinstance(data, list) else data.get("markets", data.get("data", []))
-                if not items:
+                events = data if isinstance(data, list) else data.get("events", data.get("data", []))
+                if not events:
                     break
 
-                for raw in items:
+                for raw_event in events:
                     try:
-                        market = self._parse_market(raw)
+                        market = self._parse_event(raw_event)
                         if market and market.condition_id not in seen:
                             markets.append(market)
                             seen.add(market.condition_id)
                     except Exception as exc:
-                        logger.debug("Skipping market: %s", exc)
+                        logger.debug("Skipping event: %s", exc)
 
-                if len(items) < limit:
-                    break  # last page
+                if len(events) < limit:
+                    break
 
         logger.info("Found %d active weather markets", len(markets))
         return markets
+
+    def _parse_event(self, event: dict) -> Optional[Market]:
+        """
+        Convert a Gamma API event dict into our Market dataclass.
+
+        Each event contains a list of sub-markets, one per temperature bucket.
+        The sub-market's question is the bucket label (e.g. '28°C') and its
+        YES token is what we trade.
+        """
+        title: str = event.get("title", "") or event.get("question", "")
+        tags: list[str] = []
+        raw_tags = event.get("tags", []) or []
+        for t in raw_tags:
+            tags.append(t.get("label", t.get("slug", str(t))) if isinstance(t, dict) else str(t))
+
+        if not _is_weather_market(title, tags):
+            return None
+
+        end_date_str = event.get("endDate") or event.get("end_date", "")
+        try:
+            end_date = datetime.fromisoformat(str(end_date_str).rstrip("Z"))
+        except Exception:
+            end_date = datetime.utcnow()
+
+        if end_date < datetime.utcnow():
+            return None
+
+        sub_markets: list[dict] = event.get("markets", []) or []
+        if not sub_markets:
+            return None
+
+        buckets: list[TemperatureBucket] = []
+        prices: dict[str, float] = {}
+        condition_id = event.get("id", event.get("conditionId", ""))
+
+        for sm in sub_markets:
+            # The sub-market question IS the bucket label (e.g. "28°C")
+            label = sm.get("question", sm.get("title", "")).strip()
+            if not label:
+                continue
+
+            # YES token id
+            clob_ids = sm.get("clobTokenIds", [])
+            token_id = clob_ids[0] if clob_ids else sm.get("conditionId", "")
+
+            # YES price (first of outcomePrices)
+            outcome_prices = sm.get("outcomePrices", [])
+            try:
+                price = float(outcome_prices[0]) if outcome_prices else 0.5
+            except (ValueError, TypeError):
+                price = 0.5
+
+            bucket = _parse_bucket(label, str(token_id))
+            # Only keep buckets that parsed to a real range (not -inf/+inf fallback)
+            if bucket.low != -math.inf or bucket.high != math.inf:
+                buckets.append(bucket)
+                prices[label] = price
+
+        if not buckets:
+            return None
+
+        location_name = _extract_location(title, self.KNOWN_LOCATIONS) or "Unknown"
+        target_date = _extract_date(title) or end_date.date().isoformat()
+        volume = float(event.get("volume", 0) or 0)
+
+        return Market(
+            condition_id=str(condition_id),
+            question=title,
+            location_name=location_name,
+            target_date=target_date,
+            buckets=buckets,
+            prices=prices,
+            volume=volume,
+            end_date=end_date,
+        )
 
     def _parse_market(self, raw: dict) -> Optional[Market]:
         question: str = raw.get("question", "") or raw.get("title", "")

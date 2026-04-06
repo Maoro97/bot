@@ -89,3 +89,27 @@ locations:
     timezone: America/Chicago
     resolution_source: noaa
     resolution_station: KORD
+
+  - name: Moscow
+    lat: 55.7558
+    lon: 37.6173
+    icao: UUWW               # Vnukovo International
+    timezone: Europe/Moscow
+    resolution_source: weather_underground
+    resolution_station: UUWW
+
+  - name: Istanbul
+    lat: 41.0082
+    lon: 28.9784
+    icao: LTFM               # Istanbul Airport
+    timezone: Europe/Istanbul
+    resolution_source: weather_underground
+    resolution_station: LTFM
+
+  - name: Tel Aviv
+    lat: 32.0853
+    lon: 34.7818
+    icao: LLBG               # Ben Gurion International
+    timezone: Asia/Jerusalem
+    resolution_source: weather_underground
+    resolution_station: LLBG
