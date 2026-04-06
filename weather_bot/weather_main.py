@@ -55,6 +55,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.info("Log file: %s", _log_file)
 
+# Suppress noisy third-party loggers
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
 # ── GFS / ECMWF update hours (UTC) ──────────────────────────────────────────
 MODEL_UPDATE_HOURS = {0, 6, 12, 18}
 

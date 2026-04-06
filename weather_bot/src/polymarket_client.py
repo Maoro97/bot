@@ -146,12 +146,12 @@ class PolymarketClient:
     async def get_weather_markets(self) -> list[Market]:
         """Fetch active weather/temperature markets from Polymarket's public API."""
         markets: list[Market] = []
+        seen: set[str] = set()
+        limit = 100
+        max_pages = 5  # cap at 500 markets per keyword to avoid endless pagination
 
-        # Try multiple keyword searches to catch all weather/temperature markets
         for keyword in ("temperature", "weather", "celsius"):
-            offset = 0
-            limit = 100
-            while True:
+            for page in range(max_pages):
                 try:
                     resp = await self._http.get(
                         f"{GAMMA_HOST}/markets",
@@ -159,22 +159,21 @@ class PolymarketClient:
                             "active": "true",
                             "closed": "false",
                             "limit": limit,
-                            "offset": offset,
-                            "question": keyword,
+                            "offset": page * limit,
+                            "_q": keyword,        # Gamma API keyword search
                         },
                     )
                     resp.raise_for_status()
                     data = resp.json()
                 except Exception as exc:
-                    logger.warning("Failed to fetch markets (keyword=%s offset=%d): %s",
-                                   keyword, offset, exc)
+                    logger.warning("Failed to fetch markets (keyword=%s page=%d): %s",
+                                   keyword, page, exc)
                     break
 
                 items = data if isinstance(data, list) else data.get("markets", data.get("data", []))
                 if not items:
                     break
 
-                seen = {m.condition_id for m in markets}
                 for raw in items:
                     try:
                         market = self._parse_market(raw)
@@ -185,8 +184,7 @@ class PolymarketClient:
                         logger.debug("Skipping market: %s", exc)
 
                 if len(items) < limit:
-                    break
-                offset += limit
+                    break  # last page
 
         logger.info("Found %d active weather markets", len(markets))
         return markets
