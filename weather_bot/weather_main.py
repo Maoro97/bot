@@ -318,9 +318,12 @@ async def _async_main(args):
 
         bt = Backtester(initial_bankroll=100.0)
         # Minimal demo using synthetic data (replace with real CSV paths in production)
-        logger.info("Running backtest demo with synthetic data...")
-        n = 60
-        dates = [(date(2024, 1, 1) + timedelta(days=i)).isoformat() for i in range(n)]
+        start_dt = date.fromisoformat(args.start)
+        end_dt   = date.fromisoformat(args.end)
+        n = (end_dt - start_dt).days + 1
+        logger.info("Running backtest demo with synthetic data (%s -> %s, %d days)...",
+                    args.start, args.end, n)
+        dates = [(start_dt + timedelta(days=i)).isoformat() for i in range(n)]
         forecasts = pd.DataFrame({
             "date": dates,
             "location": "London",
@@ -363,6 +366,8 @@ def main():
     parser = argparse.ArgumentParser(description="Polymarket Weather Bot")
     parser.add_argument("--live",      action="store_true", help="Live trading (default: paper)")
     parser.add_argument("--backtest",  action="store_true", help="Run backtest and exit")
+    parser.add_argument("--start",     default="2024-01-01", help="Backtest start date YYYY-MM-DD")
+    parser.add_argument("--end",       default="2024-02-29", help="Backtest end date YYYY-MM-DD")
     args = parser.parse_args()
     asyncio.run(_async_main(args))
 
