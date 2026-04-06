@@ -158,6 +158,7 @@ class WeatherBot:
         finally:
             if self._tg:
                 await self._tg.stop()
+            await self._poly.close()
             logger.info("WeatherBot stopped")
 
     async def _tick(self, now: datetime):
@@ -183,9 +184,13 @@ class WeatherBot:
 
         logger.info("Processing %d weather markets", len(markets))
 
-        # 2. Get USDC balance for sizing decisions
-        usdc_balance = await self._poly.get_usdc_balance()
-        open_positions = await self._poly.get_positions()
+        # 2. Get USDC balance for sizing decisions (paper mode uses a fixed balance)
+        if self._paper:
+            usdc_balance = self._cfg.get("paper_bankroll", 100.0)
+            open_positions = []
+        else:
+            usdc_balance = await self._poly.get_usdc_balance()
+            open_positions = await self._poly.get_positions()
 
         # 3. For each market, fetch forecast and look for edges
         for market in markets:
