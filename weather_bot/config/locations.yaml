@@ -1,0 +1,91 @@
+# Active locations for Polymarket weather markets
+# Map each city to its ICAO weather station and coordinates.
+
+locations:
+  - name: London
+    lat: 51.5074
+    lon: -0.1278
+    icao: EGLC               # London City Airport
+    timezone: Europe/London
+    resolution_source: weather_underground
+    resolution_station: EGLC
+
+  - name: NYC
+    lat: 40.7128
+    lon: -74.0060
+    icao: KJFK               # John F. Kennedy International
+    timezone: America/New_York
+    resolution_source: noaa
+    resolution_station: Central Park
+
+  - name: Hong Kong
+    lat: 22.3193
+    lon: 114.1694
+    icao: VHHH               # Hong Kong International Airport
+    timezone: Asia/Hong_Kong
+    resolution_source: weather_underground
+    resolution_station: VHHH
+
+  - name: Seoul
+    lat: 37.5665
+    lon: 126.9780
+    icao: RKSI               # Seoul Incheon International
+    timezone: Asia/Seoul
+    resolution_source: weather_underground
+    resolution_station: RKSI
+
+  - name: Tokyo
+    lat: 35.6762
+    lon: 139.6503
+    icao: RJAA               # Tokyo Narita International
+    timezone: Asia/Tokyo
+    resolution_source: weather_underground
+    resolution_station: RJAA
+
+  - name: Paris
+    lat: 48.8566
+    lon: 2.3522
+    icao: LFPG               # Charles de Gaulle
+    timezone: Europe/Paris
+    resolution_source: weather_underground
+    resolution_station: LFPG
+
+  - name: Berlin
+    lat: 52.5200
+    lon: 13.4050
+    icao: EDDB               # Berlin Brandenburg
+    timezone: Europe/Berlin
+    resolution_source: weather_underground
+    resolution_station: EDDB
+
+  - name: Singapore
+    lat: 1.3521
+    lon: 103.8198
+    icao: WSSS               # Singapore Changi
+    timezone: Asia/Singapore
+    resolution_source: weather_underground
+    resolution_station: WSSS
+
+  - name: Sydney
+    lat: -33.8688
+    lon: 151.2093
+    icao: YSSY               # Sydney Airport
+    timezone: Australia/Sydney
+    resolution_source: weather_underground
+    resolution_station: YSSY
+
+  - name: Dubai
+    lat: 25.2048
+    lon: 55.2708
+    icao: OMDB               # Dubai International
+    timezone: Asia/Dubai
+    resolution_source: weather_underground
+    resolution_station: OMDB
+
+  - name: Chicago
+    lat: 41.8781
+    lon: -87.6298
+    icao: KORD               # O'Hare International
+    timezone: America/Chicago
+    resolution_source: noaa
+    resolution_station: KORD
