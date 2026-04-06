@@ -30,6 +30,11 @@ from .src.risk_manager import RiskManager
 from .src.trade_executor import TradeExecutor
 from .src.telegram_bot import TelegramReporter
 
+# Ensure data directories exist before setting up file logging
+Path("data/trades").mkdir(parents=True, exist_ok=True)
+Path("data/calibration").mkdir(parents=True, exist_ok=True)
+Path("data/pnl").mkdir(parents=True, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
