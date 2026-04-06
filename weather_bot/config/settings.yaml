@@ -8,6 +8,8 @@ min_volume: 500.0           # minimum market volume (USD)
 max_spread: 0.05            # maximum bid-ask spread
 min_model_agreement: 0.60   # models must agree at least this much
 
+paper_bankroll: 100.0       # simulated USDC balance for paper trading
+
 # ── Risk limits ───────────────────────────────────────────────────────────
 max_bet_size: 3.0           # max USD per individual bet
 max_daily_exposure: 50.0    # max total USD wagered per day

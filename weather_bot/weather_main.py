@@ -34,15 +34,30 @@ Path("data/trades").mkdir(parents=True, exist_ok=True)
 Path("data/calibration").mkdir(parents=True, exist_ok=True)
 Path("data/pnl").mkdir(parents=True, exist_ok=True)
 
+# Reconfigure stdout to UTF-8 on Windows where the default codepage may not
+# support Unicode characters (e.g. cp1252, cp1255).
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+# Ensure data directories exist before setting up file logging
+Path("data/trades").mkdir(parents=True, exist_ok=True)
+Path("data/calibration").mkdir(parents=True, exist_ok=True)
+Path("data/pnl").mkdir(parents=True, exist_ok=True)
+Path("data/logs").mkdir(parents=True, exist_ok=True)
+
+_run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+_log_file = Path("data/logs") / f"run_{_run_ts}.log"
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("data/weather_bot.log"),
+        logging.FileHandler(str(_log_file), encoding="utf-8"),
     ],
 )
 logger = logging.getLogger(__name__)
+logger.info("Log file: %s", _log_file)
 
 # ── GFS / ECMWF update hours (UTC) ──────────────────────────────────────────
 MODEL_UPDATE_HOURS = {0, 6, 12, 18}
@@ -152,6 +167,7 @@ class WeatherBot:
         finally:
             if self._tg:
                 await self._tg.stop()
+            await self._poly.close()
             logger.info("WeatherBot stopped")
 
     async def _tick(self, now: datetime):
@@ -177,9 +193,13 @@ class WeatherBot:
 
         logger.info("Processing %d weather markets", len(markets))
 
-        # 2. Get USDC balance for sizing decisions
-        usdc_balance = await self._poly.get_usdc_balance()
-        open_positions = await self._poly.get_positions()
+        # 2. Get USDC balance for sizing decisions (paper mode uses a fixed balance)
+        if self._paper:
+            usdc_balance = self._cfg.get("paper_bankroll", 100.0)
+            open_positions = []
+        else:
+            usdc_balance = await self._poly.get_usdc_balance()
+            open_positions = await self._poly.get_positions()
 
         # 3. For each market, fetch forecast and look for edges
         for market in markets:
@@ -312,9 +332,12 @@ async def _async_main(args):
 
         bt = Backtester(initial_bankroll=100.0)
         # Minimal demo using synthetic data (replace with real CSV paths in production)
-        logger.info("Running backtest demo with synthetic data...")
-        n = 60
-        dates = [(date(2024, 1, 1) + timedelta(days=i)).isoformat() for i in range(n)]
+        start_dt = date.fromisoformat(args.start)
+        end_dt   = date.fromisoformat(args.end)
+        n = (end_dt - start_dt).days + 1
+        logger.info("Running backtest demo with synthetic data (%s -> %s, %d days)...",
+                    args.start, args.end, n)
+        dates = [(start_dt + timedelta(days=i)).isoformat() for i in range(n)]
         forecasts = pd.DataFrame({
             "date": dates,
             "location": "London",
@@ -346,9 +369,15 @@ async def _async_main(args):
 
     bot = WeatherBot(config, locations, paper_trade=not args.live)
 
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, bot.stop)
+    # add_signal_handler is Unix-only; on Windows use signal.signal instead
+    try:
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, bot.stop)
+    except NotImplementedError:
+        signal.signal(signal.SIGINT, lambda *_: bot.stop())
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, lambda *_: bot.stop())
 
     await bot.run()
 
@@ -357,6 +386,8 @@ def main():
     parser = argparse.ArgumentParser(description="Polymarket Weather Bot")
     parser.add_argument("--live",      action="store_true", help="Live trading (default: paper)")
     parser.add_argument("--backtest",  action="store_true", help="Run backtest and exit")
+    parser.add_argument("--start",     default="2024-01-01", help="Backtest start date YYYY-MM-DD")
+    parser.add_argument("--end",       default="2024-02-29", help="Backtest end date YYYY-MM-DD")
     args = parser.parse_args()
     asyncio.run(_async_main(args))
 

@@ -60,7 +60,7 @@ class RiskManager:
     def _reset_if_new_day(self):
         today = date.today().isoformat()
         if self._state.get("date") != today:
-            logger.info("New day — resetting daily risk counters")
+            logger.info("New day - resetting daily risk counters")
             self._state.update({
                 "date": today,
                 "daily_wagered": 0.0,
